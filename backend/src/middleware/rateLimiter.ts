@@ -1,17 +1,49 @@
 import rateLimit from 'express-rate-limit';
-import RedisStore from 'rate-limit-redis';
 import { redisClient } from '../lib/redis';
 import crypto from 'crypto';
 import { Request } from 'express';
 
-// Create a Redis store for rate limiting
-const createRedisStore = (prefix: string) => {
-  return new RedisStore({
-    client: redisClient,
-    prefix: `rl:${prefix}:`,
-    sendCommand: (...args: string[]) => (redisClient as any).sendCommand(args),
-  });
-};
+// Custom Redis store implementation for rate-limit
+class CustomRedisStore {
+  constructor(private prefix: string) {}
+
+  async increment(key: string): Promise<{ totalHits: number; resetTime?: Date }> {
+    const fullKey = `${this.prefix}:${key}`;
+    const now = Date.now();
+    const window = 15 * 60 * 1000; // 15 minutes in ms
+    const expiry = Math.ceil(window / 1000); // Convert to seconds for Redis
+    
+    // Increment the counter
+    const count = await redisClient.incr(fullKey);
+    
+    // Set expiry only if this is the first request in the window
+    if (count === 1) {
+      await redisClient.expire(fullKey, expiry);
+    }
+    
+    // Get TTL to calculate reset time
+    const ttl = await redisClient.ttl(fullKey);
+    const resetTime = ttl > 0 ? new Date(now + ttl * 1000) : new Date(now + window);
+    
+    return {
+      totalHits: count,
+      resetTime,
+    };
+  }
+
+  async decrement(key: string): Promise<void> {
+    const fullKey = `${this.prefix}:${key}`;
+    const current = await redisClient.get(fullKey);
+    if (current && parseInt(current) > 0) {
+      await redisClient.decr(fullKey);
+    }
+  }
+
+  async resetKey(key: string): Promise<void> {
+    const fullKey = `${this.prefix}:${key}`;
+    await redisClient.del(fullKey);
+  }
+}
 
 // Key generator that combines IP and User-Agent for better tracking
 const keyGenerator = (req: Request): string => {
@@ -20,9 +52,9 @@ const keyGenerator = (req: Request): string => {
   return `${req.ip}-${userAgentHash}`;
 };
 
-// General API rate limiter
+// General API rate limiter with Redis
 export const apiLimiter = rateLimit({
-  store: createRedisStore('api'),
+  store: new CustomRedisStore('rl:api') as any,
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each key to 100 requests per windowMs
   message: 'Too many requests from this IP, please try again later.',
@@ -33,7 +65,7 @@ export const apiLimiter = rateLimit({
 
 // Stricter rate limiter for authentication endpoints
 export const authLimiter = rateLimit({
-  store: createRedisStore('auth'),
+  store: new CustomRedisStore('rl:auth') as any,
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5, // Only 5 auth attempts per windowMs
   message: 'Too many authentication attempts, please try again later.',
@@ -45,7 +77,7 @@ export const authLimiter = rateLimit({
 
 // Even stricter rate limiter for password reset/sensitive operations
 export const strictLimiter = rateLimit({
-  store: createRedisStore('strict'),
+  store: new CustomRedisStore('rl:strict') as any,
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 3, // Only 3 attempts per hour
   message: 'Too many attempts for this sensitive operation. Please wait before trying again.',
@@ -58,7 +90,7 @@ export const strictLimiter = rateLimit({
 // Progressive rate limiter with penalties for repeated failures
 export const createProgressiveLimiter = (baseMax: number, windowMs: number, prefix: string) => {
   return rateLimit({
-    store: createRedisStore(prefix),
+    store: new CustomRedisStore(`rl:${prefix}`) as any,
     windowMs,
     max: async (req: Request) => {
       // Get the number of failed attempts from Redis
@@ -84,7 +116,7 @@ export const trackFailedAttempt = async (req: Request): Promise<void> => {
   const attempts = parseInt(current || '0', 10) + 1;
   
   // Store with 1 hour expiry
-  await redisClient.setex(key, 3600, attempts.toString());
+  await redisClient.setEx(key, 3600, attempts.toString());
 };
 
 // Clear failed attempts on successful authentication
@@ -106,7 +138,7 @@ export const getRoleLimiter = (role: string) => {
   const multiplier = multipliers[role] || 1;
   
   return rateLimit({
-    store: createRedisStore(`role:${role}`),
+    store: new CustomRedisStore(`rl:role:${role}`) as any,
     windowMs: 15 * 60 * 1000,
     max: Math.floor(100 * multiplier),
     message: `Rate limit for ${role} exceeded.`,
