@@ -58,6 +58,8 @@ export const errorHandler = (
   }
 
   const appError = error as AppError;
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  const isInternalError = appError.statusCode >= 500;
 
   // Log error
   logger.error({
@@ -71,14 +73,21 @@ export const errorHandler = (
     userAgent: req.get('user-agent'),
   });
 
-  // Send error response
+  // Send error response - hide sensitive information in production
   res.status(appError.statusCode).json({
     success: false,
     error: {
       code: appError.code,
-      message: appError.message,
-      ...(process.env.NODE_ENV === 'development' && {
+      // Hide internal error messages in production
+      message: isInternalError && !isDevelopment 
+        ? 'An error occurred processing your request' 
+        : appError.message,
+      // Only include details in development for non-internal errors
+      ...(isDevelopment && !isInternalError && {
         details: appError.details,
+      }),
+      // Never include stack trace in production
+      ...(isDevelopment && {
         stack: appError.stack,
       }),
     },
