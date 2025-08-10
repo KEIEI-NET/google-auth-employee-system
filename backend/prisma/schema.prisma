@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Employee {
+  id             String          @id @default(uuid())
+  googleId       String          @unique
+  email          String          @unique
+  name           String
+  profilePicture String?
+  department     String?
+  position       String?
+  phoneNumber    String?
+  isActive       Boolean         @default(true)
+  lastLoginAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  employeeRoles EmployeeRole[]
+  auditLogs     AuditLog[]
+
+  @@index([email])
+  @@index([googleId])
+  @@map("employees")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  priority    Int      @default(0) // Higher number = higher priority
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employeeRoles   EmployeeRole[]
+  rolePermissions RolePermission[]
+
+  @@index([name])
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  resource    String   // e.g., "employee", "role", "report"
+  action      String   // e.g., "create", "read", "update", "delete"
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  rolePermissions RolePermission[]
+
+  @@unique([resource, action])
+  @@index([resource])
+  @@map("permissions")
+}
+
+model EmployeeRole {
+  id         String   @id @default(uuid())
+  employeeId String
+  roleId     String
+  assignedAt DateTime @default(now())
+  assignedBy String? // ID of the admin who assigned this role
+  expiresAt  DateTime? // Optional: for temporary role assignments
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  role     Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, roleId])
+  @@index([employeeId])
+  @@index([roleId])
+  @@map("employee_roles")
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  employeeId    String?
+  action        String   // e.g., "LOGIN", "LOGOUT", "CREATE_EMPLOYEE", "UPDATE_ROLE"
+  resource      String?  // The resource being acted upon
+  resourceId    String?  // ID of the resource
+  details       Json?    // Additional details about the action
+  ipAddress     String?
+  userAgent     String?
+  success       Boolean  @default(true)
+  errorMessage  String?
+  timestamp     DateTime @default(now())
+
+  employee Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId])
+  @@index([action])
+  @@index([timestamp])
+  @@map("audit_logs")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  employeeId   String
+  token        String   @unique
+  refreshToken String?  @unique
+  ipAddress    String?
+  userAgent    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model OAuthState {
+  id           String   @id @default(uuid())
+  state        String   @unique
+  codeVerifier String
+  ipAddress    String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([state])
+  @@index([expiresAt])
+  @@map("oauth_states")
+}

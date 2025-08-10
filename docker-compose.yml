@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: google-auth-postgres
+    environment:
+      POSTGRES_DB: google_auth_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: google-auth-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+
+  # Uncomment for production deployment
+  # backend:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #   container_name: google-auth-backend
+  #   environment:
+  #     NODE_ENV: production
+  #     DATABASE_URL: postgresql://postgres:postgres123@postgres:5432/google_auth_db
+  #     REDIS_URL: redis://redis:6379
+  #   ports:
+  #     - "5000:5000"
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #   networks:
+  #     - app-network
+
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   container_name: google-auth-frontend
+  #   ports:
+  #     - "80:80"
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - app-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge
