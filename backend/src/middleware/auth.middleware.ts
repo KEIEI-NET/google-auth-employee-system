@@ -4,7 +4,6 @@ import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/AppError';
 import { JWTPayload } from '../types/auth.types';
 import logger from '../utils/logger';
-import crypto from 'crypto';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -27,16 +26,8 @@ export const authenticate = async (
       throw new AppError('No token provided', 401, 'UNAUTHORIZED');
     }
 
-    // Verify token with timing-safe comparison
+    // Verify token - JWT.verify already provides secure validation
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
-    
-    // Additional timing-safe verification
-    const tokenHash = crypto.createHash('sha256').update(token).digest();
-    const expectedHash = crypto.createHash('sha256').update(token).digest();
-    
-    if (!crypto.timingSafeEqual(tokenHash, expectedHash)) {
-      throw new AppError('Invalid token', 401, 'INVALID_TOKEN');
-    }
 
     // Get employee with roles and permissions
     const employee = await prisma.employee.findUnique({
