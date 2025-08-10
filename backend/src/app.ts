@@ -3,7 +3,6 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import rateLimit from 'express-rate-limit';
 import mongoSanitize from 'express-mongo-sanitize';
 import { json, urlencoded } from 'body-parser';
 import dotenv from 'dotenv';
@@ -14,6 +13,7 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 
 import { errorHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
+import { apiLimiter, authLimiter } from './middleware/rateLimiter';
 import authRoutes from './routes/auth.routes';
 import employeeRoutes from './routes/employee.routes';
 import { prisma } from './lib/prisma';
@@ -76,26 +76,6 @@ const corsOptions: cors.CorsOptions = {
 
 app.use(cors(corsOptions));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-app.use('/api/', limiter);
-
-// More aggressive rate limiting for auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  skipSuccessfulRequests: true,
-});
-
-app.use('/api/auth/', authLimiter);
-
 // Body parsing middleware
 app.use(json({ limit: '10mb' }));
 app.use(urlencoded({ extended: true, limit: '10mb' }));
@@ -109,7 +89,11 @@ app.use(mongoSanitize());
 // Request logging
 app.use(requestLogger);
 
-// Health check endpoint
+// Rate limiting with Redis store
+app.use('/api/', apiLimiter);
+app.use('/api/auth/', authLimiter);
+
+// Health check endpoint (no rate limiting)
 app.get('/health', async (req, res, next) => {
   try {
     // Check database connection

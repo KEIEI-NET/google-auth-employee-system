@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { body, validationResult } from 'express-validator';
 import { AuthService } from '../services/auth.service';
 import { authenticate } from '../middleware/auth.middleware';
+import { strictLimiter, trackFailedAttempt, clearFailedAttempts } from '../middleware/rateLimiter';
 import { AppError } from '../utils/AppError';
 import logger from '../utils/logger';
 
@@ -43,9 +44,10 @@ router.get('/google', async (req, res, next) => {
   }
 });
 
-// Handle OAuth callback
+// Handle OAuth callback with strict rate limiting
 router.post(
   '/google/callback',
+  strictLimiter, // Apply strict rate limiting for OAuth callback
   [
     body('code').notEmpty().withMessage('Authorization code is required'),
     body('state').notEmpty().withMessage('State parameter is required'),
@@ -54,6 +56,7 @@ router.post(
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
+        await trackFailedAttempt(req); // Track failed validation
         throw new AppError(
           'Validation failed',
           400,
@@ -65,24 +68,32 @@ router.post(
       const { code, state } = req.body;
       const ipAddress = req.ip || req.connection.remoteAddress || '';
       
-      // Handle the OAuth callback
-      const result = await AuthService.handleGoogleCallback(
-        code,
-        state,
-        ipAddress
-      );
-      
-      // Set httpOnly cookies
-      res.cookie('accessToken', result.tokens.accessToken, getCookieOptions(15 * 60 * 1000)); // 15 minutes
-      res.cookie('refreshToken', result.tokens.refreshToken, getCookieOptions(7 * 24 * 60 * 60 * 1000)); // 7 days
-      
-      // Return user data without tokens
-      res.json({
-        success: true,
-        data: {
-          employee: result.employee
-        },
-      });
+      try {
+        // Handle the OAuth callback
+        const result = await AuthService.handleGoogleCallback(
+          code,
+          state,
+          ipAddress
+        );
+        
+        // Clear failed attempts on successful login
+        await clearFailedAttempts(req);
+        
+        // Set httpOnly cookies
+        res.cookie('accessToken', result.tokens.accessToken, getCookieOptions(15 * 60 * 1000)); // 15 minutes
+        res.cookie('refreshToken', result.tokens.refreshToken, getCookieOptions(7 * 24 * 60 * 60 * 1000)); // 7 days
+        
+        // Return user data without tokens
+        res.json({
+          success: true,
+          data: {
+            employee: result.employee
+          },
+        });
+      } catch (authError) {
+        await trackFailedAttempt(req); // Track failed authentication
+        throw authError;
+      }
     } catch (error) {
       next(error);
     }
