@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
+import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import mongoSanitize from 'express-mongo-sanitize';
 import { json, urlencoded } from 'body-parser';
@@ -25,6 +26,9 @@ validateEnv();
 
 const app = express();
 
+// Cookie parser (must be before CORS)
+app.use(cookieParser());
+
 // Security middleware
 app.use(
   helmet({
@@ -36,6 +40,8 @@ app.use(
         fontSrc: ["'self'", 'https://fonts.gstatic.com'],
         imgSrc: ["'self'", 'data:', 'https:'],
         connectSrc: ["'self'", 'https://accounts.google.com'],
+        frameAncestors: ["'none'"],
+        baseUri: ["'self'"],
       },
     },
     hsts: {
@@ -43,10 +49,16 @@ app.use(
       includeSubDomains: true,
       preload: true,
     },
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    permissionsPolicy: {
+      geolocation: [],
+      microphone: [],
+      camera: [],
+    },
   })
 );
 
-// CORS configuration
+// CORS configuration with cookie support
 const corsOptions: cors.CorsOptions = {
   origin: function (origin, callback) {
     const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
@@ -56,7 +68,7 @@ const corsOptions: cors.CorsOptions = {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true,
+  credentials: true, // Enable cookies
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   exposedHeaders: ['X-Total-Count', 'X-Page-Count'],
@@ -98,7 +110,7 @@ app.use(mongoSanitize());
 app.use(requestLogger);
 
 // Health check endpoint
-app.get('/health', async (req, res) => {
+app.get('/health', async (req, res, next) => {
   try {
     // Check database connection
     await prisma.$queryRaw`SELECT 1`;

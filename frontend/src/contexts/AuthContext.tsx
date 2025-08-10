@@ -33,12 +33,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
 
-  // Configure axios defaults
+  // Configure axios defaults for cookies
   useEffect(() => {
-    const token = localStorage.getItem('accessToken');
-    if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    }
+    axios.defaults.withCredentials = true; // Enable sending cookies with requests
   }, []);
 
   // Axios interceptor for token refresh
@@ -53,8 +50,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           
           try {
             await refreshToken();
-            const token = localStorage.getItem('accessToken');
-            originalRequest.headers['Authorization'] = `Bearer ${token}`;
             return axios(originalRequest);
           } catch (refreshError) {
             logout();
@@ -75,19 +70,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const response = await axios.post(
         `${process.env.REACT_APP_API_URL}/api/auth/google/callback`,
-        { code, state }
+        { code, state },
+        { withCredentials: true } // Ensure cookies are sent
       );
 
-      const { employee, tokens } = response.data.data;
+      const { employee } = response.data.data;
       
-      // Store tokens
-      localStorage.setItem('accessToken', tokens.accessToken);
-      localStorage.setItem('refreshToken', tokens.refreshToken);
-      
-      // Set axios default header
-      axios.defaults.headers.common['Authorization'] = `Bearer ${tokens.accessToken}`;
-      
-      // Set user
+      // Set user (tokens are now in httpOnly cookies)
       setUser(employee);
       
       // Navigate to dashboard
@@ -100,14 +89,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = useCallback(async () => {
     try {
-      await axios.post(`${process.env.REACT_APP_API_URL}/api/auth/logout`);
+      await axios.post(
+        `${process.env.REACT_APP_API_URL}/api/auth/logout`,
+        {},
+        { withCredentials: true }
+      );
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      // Clear tokens and user data
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      delete axios.defaults.headers.common['Authorization'];
+      // Clear user data
       setUser(null);
       navigate('/login');
     }
@@ -115,21 +105,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshToken = useCallback(async () => {
     try {
-      const refreshToken = localStorage.getItem('refreshToken');
-      if (!refreshToken) {
-        throw new Error('No refresh token available');
-      }
-
-      const response = await axios.post(
+      await axios.post(
         `${process.env.REACT_APP_API_URL}/api/auth/refresh`,
-        { refreshToken }
+        {},
+        { withCredentials: true }
       );
-
-      const { accessToken } = response.data.data;
-      
-      // Update tokens
-      localStorage.setItem('accessToken', accessToken);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
     } catch (error) {
       console.error('Token refresh failed:', error);
       throw error;
@@ -139,22 +119,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Check for existing session on mount
   useEffect(() => {
     const checkAuth = async () => {
-      const token = localStorage.getItem('accessToken');
-      
-      if (!token) {
-        setIsLoading(false);
-        return;
-      }
-
       try {
         const response = await axios.get(
-          `${process.env.REACT_APP_API_URL}/api/auth/me`
+          `${process.env.REACT_APP_API_URL}/api/auth/me`,
+          { withCredentials: true }
         );
         setUser(response.data.data);
       } catch (error) {
         console.error('Auth check failed:', error);
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
       } finally {
         setIsLoading(false);
       }

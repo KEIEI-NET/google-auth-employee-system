@@ -20,7 +20,8 @@ export const authenticate = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    // Try to get token from cookie first, then from Authorization header
+    const token = req.cookies?.accessToken || req.headers.authorization?.replace('Bearer ', '');
 
     if (!token) {
       throw new AppError('No token provided', 401, 'UNAUTHORIZED');
